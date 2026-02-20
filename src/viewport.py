@@ -43,7 +43,7 @@ class Viewport:
 
     def __init__(self, thumbnail_width: int = 320) -> None:
         self.thumbnail_width = thumbnail_width
-        logger.info("Viewport initialised (thumbnail_width=%d)", thumbnail_width)
+        logger.info("Viewport initialized (thumbnail_width=%d)", thumbnail_width)
 
     # ------------------------------------------------------------------
     # Monitor information

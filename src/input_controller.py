@@ -54,7 +54,7 @@ class InputController:
         self._enabled = enabled
         self.move_duration = move_duration
         self.fail_safe = fail_safe
-        logger.info("InputController initialised (enabled=%s)", self._enabled)
+        logger.info("InputController initialized (enabled=%s)", self._enabled)
 
     # ------------------------------------------------------------------
     # Enable / disable

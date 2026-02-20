@@ -243,7 +243,7 @@ class AIBot:
             grounding,
             "",
             "Action plan:",
-            "  1. Analyse the elements above to locate the target controls.",
+            "  1. Analyze the elements above to locate the target controls.",
             "  2. Use InputController to click / type as needed.",
             "  3. Capture a new screenshot and verify the result.",
             "  4. Repeat until the task is complete.",
