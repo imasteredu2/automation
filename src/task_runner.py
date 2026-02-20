@@ -63,6 +63,11 @@ class TaskRunner:
     action_executor:
         Optional :class:`~src.action_executor.ActionExecutor` instance.
         When provided, executable steps are generated and run after planning.
+    screenshot_manager:
+        Optional :class:`~src.screenshot_manager.ScreenshotManager` instance.
+        When provided, the captured frame is automatically saved before each
+        task runs, and the post-execution screenshot (if generated) is saved
+        with bounding-box annotations when available.
     monitor_index:
         Which physical monitor to capture for the primary viewport.
     minimap_interval:
@@ -76,6 +81,7 @@ class TaskRunner:
         input_controller,
         overlay=None,
         action_executor=None,
+        screenshot_manager=None,
         monitor_index: int = 1,
         minimap_interval: float = 3.0,
     ) -> None:
@@ -84,6 +90,7 @@ class TaskRunner:
         self.input_controller = input_controller
         self.overlay = overlay
         self.action_executor = action_executor
+        self.screenshot_manager = screenshot_manager
         self.monitor_index = monitor_index
         self.minimap_interval = minimap_interval
 
@@ -152,6 +159,14 @@ class TaskRunner:
 
         try:
             frame = self.viewport.get_frame(self.monitor_index)
+
+            # Auto-save the pre-task screenshot if a manager is configured
+            if self.screenshot_manager is not None:
+                try:
+                    self.screenshot_manager.save(frame)
+                except Exception:
+                    logger.exception("ScreenshotManager: failed to save pre-task screenshot")
+
             plan = self.ai_bot.plan_task(frame, task.description)
             task.result = plan
             logger.info("Task plan:\n%s", plan)
@@ -169,6 +184,19 @@ class TaskRunner:
                         len(task.step_results),
                         task.step_results,
                     )
+                    # Save the post-execution screenshot when the SCREENSHOT step ran
+                    if (
+                        self.screenshot_manager is not None
+                        and self.action_executor.last_screenshot is not None
+                    ):
+                        try:
+                            self.screenshot_manager.save(
+                                self.action_executor.last_screenshot
+                            )
+                        except Exception:
+                            logger.exception(
+                                "ScreenshotManager: failed to save post-task screenshot"
+                            )
                 except Exception:
                     logger.exception(
                         "Step execution failed for task: %s", task.description

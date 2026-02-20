@@ -207,5 +207,71 @@ class TestActionExecutorBboxCenter(unittest.TestCase):
         self.assertIn("ActionExecutor", repr(ex))
 
 
+class TestActionExecutorNewActions(unittest.TestCase):
+    """Tests for MOVE, KEY_DOWN, and KEY_UP actions added in the second iteration."""
+
+    def setUp(self):
+        from src.action_executor import ActionExecutor
+        self.ctrl = _make_mock_ctrl()
+        self.ctrl.move_to = MagicMock(return_value=True)
+        self.ctrl.key_down = MagicMock(return_value=True)
+        self.ctrl.key_up = MagicMock(return_value=True)
+        self.executor = ActionExecutor(self.ctrl)
+
+    def test_move_action(self):
+        result = self.executor.execute_step("MOVE 300 400")
+        self.assertEqual(result, "OK")
+        self.ctrl.move_to.assert_called_once_with(300, 400)
+
+    def test_move_with_comment(self):
+        result = self.executor.execute_step("MOVE 10 20  # hover over menu")
+        self.assertEqual(result, "OK")
+        self.ctrl.move_to.assert_called_once_with(10, 20)
+
+    def test_move_case_insensitive(self):
+        result = self.executor.execute_step("move 50 60")
+        self.assertEqual(result, "OK")
+        self.ctrl.move_to.assert_called_once_with(50, 60)
+
+    def test_move_negative_coords(self):
+        result = self.executor.execute_step("MOVE -5 -10")
+        self.assertEqual(result, "OK")
+        self.ctrl.move_to.assert_called_once_with(-5, -10)
+
+    def test_key_down_action(self):
+        result = self.executor.execute_step("KEY_DOWN shift")
+        self.assertEqual(result, "OK")
+        self.ctrl.key_down.assert_called_once_with("shift")
+
+    def test_key_down_ctrl(self):
+        result = self.executor.execute_step("KEY_DOWN ctrl")
+        self.assertEqual(result, "OK")
+        self.ctrl.key_down.assert_called_once_with("ctrl")
+
+    def test_key_down_case_insensitive(self):
+        result = self.executor.execute_step("key_down alt")
+        self.assertEqual(result, "OK")
+        self.ctrl.key_down.assert_called_once_with("alt")
+
+    def test_key_up_action(self):
+        result = self.executor.execute_step("KEY_UP shift")
+        self.assertEqual(result, "OK")
+        self.ctrl.key_up.assert_called_once_with("shift")
+
+    def test_key_up_with_comment(self):
+        result = self.executor.execute_step("KEY_UP ctrl  # release ctrl")
+        self.assertEqual(result, "OK")
+        self.ctrl.key_up.assert_called_once_with("ctrl")
+
+    def test_key_down_up_sequence_in_plan(self):
+        """KEY_DOWN and KEY_UP together model holding Shift while clicking."""
+        plan = "KEY_DOWN shift\nCLICK 100 200\nKEY_UP shift"
+        results = self.executor.execute_plan(plan)
+        self.assertEqual(len(results), 3)
+        self.assertTrue(all(r == "OK" for r in results))
+        self.ctrl.key_down.assert_called_once_with("shift")
+        self.ctrl.key_up.assert_called_once_with("shift")
+
+
 if __name__ == "__main__":
     unittest.main()

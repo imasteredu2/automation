@@ -265,5 +265,61 @@ class TestTaskRunnerActionExecutor(unittest.TestCase):
         self.bot.generate_executable_steps.assert_not_called()
 
 
+class TestTaskRunnerScreenshotManager(unittest.TestCase):
+    """ScreenshotManager is called to auto-save screenshots during task execution."""
+
+    def setUp(self):
+        from src.task_runner import TaskRunner
+        self.vp = _make_mock_viewport()
+        self.bot = _make_mock_ai_bot()
+        self.ctrl = _make_mock_input_ctrl()
+        self.screenshot_mgr = MagicMock()
+        self.runner = TaskRunner(
+            viewport=self.vp,
+            ai_bot=self.bot,
+            input_controller=self.ctrl,
+            overlay=None,
+            screenshot_manager=self.screenshot_mgr,
+            minimap_interval=999,
+        )
+
+    def tearDown(self):
+        self.runner.stop()
+
+    def test_screenshot_saved_before_task(self):
+        """ScreenshotManager.save() is called with the captured frame."""
+        self.runner.start()
+        task = self.runner.submit("save screenshot task")
+        task.done.wait(timeout=5)
+        self.screenshot_mgr.save.assert_called()
+
+    def test_screenshot_save_receives_pillow_image(self):
+        """The argument to ScreenshotManager.save() is a Pillow Image."""
+        from PIL import Image as PILImage
+        self.runner.start()
+        task = self.runner.submit("image type check")
+        task.done.wait(timeout=5)
+        call_arg = self.screenshot_mgr.save.call_args[0][0]
+        self.assertIsInstance(call_arg, PILImage.Image)
+
+    def test_no_screenshot_manager_no_error(self):
+        """TaskRunner without a ScreenshotManager completes tasks without error."""
+        from src.task_runner import TaskRunner
+        runner = TaskRunner(
+            viewport=self.vp,
+            ai_bot=self.bot,
+            input_controller=self.ctrl,
+            overlay=None,
+            screenshot_manager=None,
+            minimap_interval=999,
+        )
+        runner.start()
+        task = runner.submit("no screenshot mgr")
+        task.done.wait(timeout=5)
+        runner.stop()
+        # Should complete without error
+        self.assertIsNotNone(task.result)
+
+
 if __name__ == "__main__":
     unittest.main()

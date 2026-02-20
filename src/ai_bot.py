@@ -36,6 +36,7 @@ Usage
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -192,6 +193,9 @@ class AIBot:
     def query(self, image, question: str) -> str:
         """Ask an open-ended question about the screen.
 
+        Returns a natural-language description of the screen, optionally
+        narrowed toward the topic of *question* via phrase grounding.
+
         Parameters
         ----------
         image:
@@ -200,7 +204,59 @@ class AIBot:
             Free-form question in plain English.
         """
         logger.debug("query called: %s", question)
-        return self._run(image, "<OPEN_VOCABULARY_DETECTION>", question)
+        # Get a detailed caption first
+        caption = self._run(image, "<MORE_DETAILED_CAPTION>")
+        # Try to ground the question against the caption for extra context
+        try:
+            grounding = self._run(image, "<CAPTION_TO_PHRASE_GROUNDING>", question)
+        except Exception:
+            grounding = ""
+        parts = [f"Screen: {caption}"]
+        if grounding and grounding != "{}":
+            parts.append(f"Related: {grounding}")
+        return "\n".join(parts)
+
+    def check_goal(self, image, goal: str) -> str:
+        """Check whether *goal* appears to be achieved from the screen contents.
+
+        Uses the detailed caption to decide whether the goal is likely met.
+        Returns a short natural-language response starting with "yes" or "no".
+
+        Parameters
+        ----------
+        image:
+            Current screenshot as a Pillow Image.
+        goal:
+            Plain-English description of the desired end state.
+        """
+        logger.debug("check_goal called: %s", goal)
+        caption = self._run(image, "<MORE_DETAILED_CAPTION>")
+        caption_lower = caption.lower()
+        goal_lower = goal.lower()
+
+        # Extract meaningful tokens from the goal (skip common stop words)
+        _STOP = {
+            "a", "an", "the", "and", "or", "to", "in", "on", "at", "of",
+            "is", "it", "for", "with", "this", "that", "are", "be", "by",
+            "open", "go", "click", "press", "navigate", "start", "run",
+        }
+        tokens = [
+            t for t in re.split(r"[\s\-_/.,;:!?\"'()]+", goal_lower)
+            if t and t not in _STOP and len(t) > 2
+        ]
+
+        matched = [t for t in tokens if t in caption_lower]
+        ratio = len(matched) / max(1, len(tokens))
+
+        if ratio >= 0.5:
+            return (
+                f"yes, the screen appears to show the goal is achieved "
+                f"(matched {len(matched)}/{len(tokens)} goal tokens in caption)."
+            )
+        return (
+            f"no, the goal does not appear to be achieved yet "
+            f"(only {len(matched)}/{len(tokens)} goal tokens found in caption: {caption[:200]})"
+        )
 
     def ocr(self, image) -> str:
         """Extract all visible text from the screenshot.

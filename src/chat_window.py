@@ -64,10 +64,18 @@ class ChatWindow:
     ----------
     max_messages:
         Maximum number of messages to retain in memory (oldest are dropped).
+    task_submit_callback:
+        Optional callable invoked when the user submits a task via the chat
+        window's input field.  Signature: ``callback(task_text: str)``.
     """
 
-    def __init__(self, max_messages: int = 200) -> None:
+    def __init__(
+        self,
+        max_messages: int = 200,
+        task_submit_callback=None,
+    ) -> None:
         self.max_messages = max_messages
+        self._task_submit_callback = task_submit_callback
         self._messages: List[Dict] = []
         self._root = None
         self._text = None
@@ -75,6 +83,8 @@ class ChatWindow:
         self._tk = None
         self._tkfont = None
         self._st = None
+        self._input_var = None
+        self._input_entry = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -179,6 +189,42 @@ class ChatWindow:
 
         self._text.tag_config("timestamp", foreground="#444466")
 
+        # Task input bar at the bottom
+        sep_bottom = tk.Frame(root, bg="#333366", height=1)
+        sep_bottom.pack(fill=tk.X, padx=8, pady=(4, 0))
+
+        input_frame = tk.Frame(root, bg=_WIN_BG)
+        input_frame.pack(fill=tk.X, padx=8, pady=(4, 4))
+
+        self._input_var = tk.StringVar()
+        self._input_entry = tk.Entry(
+            input_frame,
+            textvariable=self._input_var,
+            bg="#1A1A30",
+            fg="#E0E0E0",
+            insertbackground="#E0E0E0",
+            relief="flat",
+            font=tkfont.Font(family="Helvetica", size=9),
+        )
+        self._input_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+        self._input_entry.bind("<Return>", lambda _e: self._submit_input())
+        self._input_entry.insert(0, self._PLACEHOLDER)
+        self._input_entry.bind("<FocusIn>", self._on_entry_focus_in)
+        self._input_entry.bind("<FocusOut>", self._on_entry_focus_out)
+
+        send_btn = tk.Button(
+            input_frame,
+            text="▶",
+            bg="#00CC66",
+            fg="#000000",
+            activebackground="#009944",
+            relief="flat",
+            font=tkfont.Font(family="Helvetica", size=9),
+            command=self._submit_input,
+            cursor="hand2",
+        )
+        send_btn.pack(side=tk.RIGHT)
+
         hint = tk.Label(
             root,
             text="Messages are color-coded: You (blue) · Bot (green) · System (grey)",
@@ -186,11 +232,48 @@ class ChatWindow:
             fg="#555577",
             bg=_WIN_BG,
         )
-        hint.pack(side=tk.BOTTOM, pady=4)
+        hint.pack(side=tk.BOTTOM, pady=2)
 
         # Replay any buffered messages that arrived before start()
         for msg in self._messages:
             self._render_message(msg)
+
+    # ------------------------------------------------------------------
+    # Task input helpers
+    # ------------------------------------------------------------------
+
+    _PLACEHOLDER = "Type a task and press Enter…"
+
+    def _on_entry_focus_in(self, _event=None) -> None:
+        """Clear the placeholder text when the entry gains focus."""
+        if self._input_entry and self._input_var:
+            if self._input_var.get() == self._PLACEHOLDER:
+                self._input_entry.delete(0, self._tk.END)
+                self._input_entry.config(fg="#E0E0E0")
+
+    def _on_entry_focus_out(self, _event=None) -> None:
+        """Restore the placeholder when the entry loses focus if empty."""
+        if self._input_entry and self._input_var:
+            if not self._input_var.get().strip():
+                self._input_entry.insert(0, self._PLACEHOLDER)
+                self._input_entry.config(fg="#555577")
+
+    def _submit_input(self) -> None:
+        """Read the task entry, invoke the callback, and clear the field."""
+        if self._input_var is None:
+            return
+        text = self._input_var.get().strip()
+        if not text or text == self._PLACEHOLDER:
+            return
+        self._input_var.set("")
+        self._input_entry.config(fg="#E0E0E0")
+        self.add_message("user", text)
+        logger.info("ChatWindow task submitted: %s", text)
+        if self._task_submit_callback:
+            try:
+                self._task_submit_callback(text)
+            except Exception:
+                logger.exception("task_submit_callback raised")
 
     # ------------------------------------------------------------------
     # Message management

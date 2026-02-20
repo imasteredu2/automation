@@ -195,6 +195,7 @@ def main() -> None:
         input_controller=input_ctrl,
         overlay=overlay,
         action_executor=action_executor,
+        screenshot_manager=screenshot_mgr,
         monitor_index=monitor_index,
         minimap_interval=cfg.minimap_interval_ms / 1000.0,
     )
@@ -207,6 +208,7 @@ def main() -> None:
         runner.submit(text, callback=_cb)
 
     overlay._task_submit_callback = _on_task_submit
+    chat_win._task_submit_callback = _on_task_submit
 
     scheduler = Scheduler(task_runner=runner)
 

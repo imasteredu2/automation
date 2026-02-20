@@ -12,10 +12,13 @@ Supported step syntax (case-insensitive)
     CLICK <x> <y> <button>         click with specified button (left/right/middle)
     DOUBLE_CLICK <x> <y>           double-click
     RIGHT_CLICK <x> <y>            right-click
+    MOVE <x> <y>                   move mouse to (x, y) without clicking
     DRAG <x1> <y1> <x2> <y2>      click-and-drag
     SCROLL <n>                     scroll n clicks (+up / -down)
     TYPE <text>                    type literal text (rest of line)
     PRESS <key>                    press and release a single key
+    KEY_DOWN <key>                 hold a key down without releasing
+    KEY_UP <key>                   release a held key
     HOTKEY <key1> <key2> ...       simultaneous key combination
     WAIT <seconds>                 pause execution
     SCREENSHOT                     capture a screenshot (stored in last_screenshot)
@@ -49,10 +52,13 @@ class ActionExecutor:
         ("CLICK",        re.compile(r"^CLICK\s+(-?\d+)\s+(-?\d+)(?:\s+(\w+))?(?:\s+#.*)?$", re.I)),
         ("DOUBLE_CLICK", re.compile(r"^DOUBLE_CLICK\s+(-?\d+)\s+(-?\d+)(?:\s+#.*)?$", re.I)),
         ("RIGHT_CLICK",  re.compile(r"^RIGHT_CLICK\s+(-?\d+)\s+(-?\d+)(?:\s+#.*)?$", re.I)),
+        ("MOVE",         re.compile(r"^MOVE\s+(-?\d+)\s+(-?\d+)(?:\s+#.*)?$", re.I)),
         ("DRAG",         re.compile(r"^DRAG\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)(?:\s+#.*)?$", re.I)),
         ("SCROLL",       re.compile(r"^SCROLL\s+(-?\d+)(?:\s+#.*)?$", re.I)),
         ("TYPE",         re.compile(r"^TYPE\s+(.+)$", re.I | re.DOTALL)),
         ("PRESS",        re.compile(r"^PRESS\s+(\S+)(?:\s+#.*)?$", re.I)),
+        ("KEY_DOWN",     re.compile(r"^KEY_DOWN\s+(\S+)(?:\s+#.*)?$", re.I)),
+        ("KEY_UP",       re.compile(r"^KEY_UP\s+(\S+)(?:\s+#.*)?$", re.I)),
         ("HOTKEY",       re.compile(r"^HOTKEY\s+([^#]+?)(?:\s+#.*)?$", re.I)),
         ("WAIT",         re.compile(r"^WAIT\s+(\d+(?:\.\d+)?)(?:\s+#.*)?$", re.I)),
         ("SCREENSHOT",   re.compile(r"^SCREENSHOT(?:\s+#.*)?$", re.I)),
@@ -133,6 +139,10 @@ class ActionExecutor:
                 x, y = int(groups[0]), int(groups[1])
                 ctrl.right_click(x, y)
 
+            elif action == "MOVE":
+                x, y = int(groups[0]), int(groups[1])
+                ctrl.move_to(x, y)
+
             elif action == "DRAG":
                 x1, y1, x2, y2 = (int(g) for g in groups)
                 ctrl.drag_to(x1, y1, x2, y2)
@@ -148,6 +158,14 @@ class ActionExecutor:
             elif action == "PRESS":
                 key = groups[0]
                 ctrl.press_key(key)
+
+            elif action == "KEY_DOWN":
+                key = groups[0]
+                ctrl.key_down(key)
+
+            elif action == "KEY_UP":
+                key = groups[0]
+                ctrl.key_up(key)
 
             elif action == "HOTKEY":
                 keys = groups[0].split()

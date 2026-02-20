@@ -22,6 +22,7 @@ def _make_mock_viewport():
 def _make_mock_ai_bot(goal_check_response: str = "no"):
     bot = MagicMock()
     bot.query.return_value = goal_check_response
+    bot.check_goal.return_value = goal_check_response
     bot.plan_task.return_value = "Step 1: do something"
     bot.generate_executable_steps.return_value = "SCREENSHOT"
     return bot
@@ -62,7 +63,7 @@ class TestAutonomousLoopGoalReached(unittest.TestCase):
         from src.autonomous_loop import AutonomousLoop
         responses = iter(["no", "yes, it is done"])
         bot = _make_mock_ai_bot()
-        bot.query.side_effect = lambda img, q: next(responses)
+        bot.check_goal.side_effect = lambda img, goal: next(responses)
         runner = _make_mock_task_runner()
         loop = AutonomousLoop(
             goal="Open Notepad",

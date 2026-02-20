@@ -196,5 +196,88 @@ class TestChatWindowDestroy(unittest.TestCase):
         win.destroy()  # must not raise
 
 
+class TestChatWindowTaskInput(unittest.TestCase):
+    """Tests for the task input field added to ChatWindow."""
+
+    def setUp(self):
+        patcher = patch("src.chat_window._get_tk", side_effect=_get_tk_stub)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_task_submit_callback_stored(self):
+        from src.chat_window import ChatWindow
+        cb = MagicMock()
+        win = ChatWindow(task_submit_callback=cb)
+        self.assertIs(win._task_submit_callback, cb)
+
+    def test_no_callback_by_default(self):
+        from src.chat_window import ChatWindow
+        win = ChatWindow()
+        self.assertIsNone(win._task_submit_callback)
+
+    def test_submit_input_calls_callback(self):
+        from src.chat_window import ChatWindow
+        received = []
+        win = ChatWindow(task_submit_callback=received.append)
+        # Simulate a filled entry
+        win._input_var = MagicMock()
+        win._input_var.get.return_value = "open notepad"
+        win._input_entry = MagicMock()
+        win._submit_input()
+        self.assertEqual(received, ["open notepad"])
+
+    def test_submit_empty_text_does_not_call_callback(self):
+        from src.chat_window import ChatWindow
+        cb = MagicMock()
+        win = ChatWindow(task_submit_callback=cb)
+        win._input_var = MagicMock()
+        win._input_var.get.return_value = ""
+        win._input_entry = MagicMock()
+        win._submit_input()
+        cb.assert_not_called()
+
+    def test_submit_placeholder_text_does_not_call_callback(self):
+        from src.chat_window import ChatWindow
+        cb = MagicMock()
+        win = ChatWindow(task_submit_callback=cb)
+        win._input_var = MagicMock()
+        win._input_var.get.return_value = win._PLACEHOLDER
+        win._input_entry = MagicMock()
+        win._submit_input()
+        cb.assert_not_called()
+
+    def test_submit_input_adds_user_message_to_log(self):
+        from src.chat_window import ChatWindow
+        win = ChatWindow()
+        win._input_var = MagicMock()
+        win._input_var.get.return_value = "do a task"
+        win._input_entry = MagicMock()
+        win._submit_input()
+        self.assertEqual(win.message_count, 1)
+        self.assertEqual(win._messages[0]["role"], "user")
+        self.assertEqual(win._messages[0]["text"], "do a task")
+
+    def test_submit_clears_entry_after_submit(self):
+        from src.chat_window import ChatWindow
+        win = ChatWindow()
+        mock_var = MagicMock()
+        mock_var.get.return_value = "some task"
+        win._input_var = mock_var
+        win._input_entry = MagicMock()
+        win._submit_input()
+        mock_var.set.assert_called_once_with("")
+
+    def test_callback_assignment_after_construction(self):
+        from src.chat_window import ChatWindow
+        win = ChatWindow()
+        cb = MagicMock()
+        win._task_submit_callback = cb
+        win._input_var = MagicMock()
+        win._input_var.get.return_value = "late callback task"
+        win._input_entry = MagicMock()
+        win._submit_input()
+        cb.assert_called_once_with("late callback task")
+
+
 if __name__ == "__main__":
     unittest.main()

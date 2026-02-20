@@ -164,10 +164,14 @@ class AutonomousLoop:
             # 1. Check whether the goal is already satisfied
             try:
                 frame = self.viewport.get_frame(self.monitor_index)
-                check_answer = self.ai_bot.query(
-                    frame,
-                    f"Is this goal already fully achieved? Answer yes or no. Goal: {self.goal}",
-                )
+                # Use check_goal if available, otherwise fall back to query
+                if hasattr(self.ai_bot, "check_goal"):
+                    check_answer = self.ai_bot.check_goal(frame, self.goal)
+                else:
+                    check_answer = self.ai_bot.query(
+                        frame,
+                        f"Is this goal already fully achieved? Answer yes or no. Goal: {self.goal}",
+                    )
                 logger.debug("Goal check answer: %r", check_answer)
 
                 if self._is_yes(check_answer):
