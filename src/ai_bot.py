@@ -250,5 +250,58 @@ class AIBot:
         ]
         return "\n".join(plan_lines)
 
+    def generate_executable_steps(
+        self,
+        image,
+        task_description: str,
+        monitor_left: int = 0,
+        monitor_top: int = 0,
+    ) -> str:
+        """Generate executable action steps for the ActionExecutor.
+
+        Uses the vision model to detect UI elements relevant to the task and
+        maps their bounding boxes to ``CLICK x y`` steps the
+        :class:`~src.action_executor.ActionExecutor` can execute directly.
+
+        The returned string contains one action per line in the syntax
+        understood by ``ActionExecutor.execute_plan()``.
+
+        Parameters
+        ----------
+        image:
+            Current screenshot as a Pillow Image.
+        task_description:
+            Plain-English description of the task to perform.
+        monitor_left, monitor_top:
+            Pixel offset of the monitor's top-left corner on the virtual
+            screen (used to convert image-relative coordinates to absolute
+            screen coordinates).
+
+        Returns
+        -------
+        Multi-line string of executable action steps.
+        """
+        import ast  # noqa: PLC0415
+
+        logger.debug("generate_executable_steps called: %s", task_description)
+        steps = [f"# Task: {task_description}", "SCREENSHOT"]
+
+        try:
+            raw = self._run(image, "<OPEN_VOCABULARY_DETECTION>", task_description)
+            data = ast.literal_eval(raw)
+            bboxes = data.get("bboxes", [])
+            labels = data.get("labels", [])
+
+            for label, bbox in zip(labels, bboxes):
+                x1, y1, x2, y2 = bbox
+                cx = monitor_left + int((x1 + x2) / 2)
+                cy = monitor_top + int((y1 + y2) / 2)
+                steps.append(f"CLICK {cx} {cy}  # {label}")
+        except Exception as exc:
+            logger.debug("Could not parse detection output into steps: %s", exc)
+            steps.append("# No executable steps generated from detection output")
+
+        return "\n".join(steps)
+
     def __repr__(self) -> str:
         return f"AIBot(model_id={self.model_id!r}, loaded={self._loaded})"

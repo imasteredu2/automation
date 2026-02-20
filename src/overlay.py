@@ -63,29 +63,38 @@ class Overlay:
         How often (milliseconds) the overlay polls for state changes.
     minimap_interval_ms:
         How often the mini-map thumbnail is refreshed.
+    task_submit_callback:
+        Optional callable invoked when the user submits a task via the
+        overlay's text entry.  Signature: ``callback(task_text: str)``.
     """
 
     def __init__(
         self,
         update_interval_ms: int = 500,
         minimap_interval_ms: int = 2000,
+        task_submit_callback=None,
     ) -> None:
         self.update_interval_ms = update_interval_ms
         self.minimap_interval_ms = minimap_interval_ms
+        self._task_submit_callback = task_submit_callback
 
-        self._root: Optional[tk.Tk] = None
+        self._root = None
         self._visible: bool = True
 
         # State that other components write to
         self.input_active: bool = True
         self.bot_running: bool = False
-        self.minimap_image: Optional[Image.Image] = None
+        self.minimap_image = None
+        self._last_result_text: str = ""
 
         # Tkinter widget references
         self._status_label = None
         self._bot_label = None
         self._minimap_label = None
         self._photo = None
+        self._task_var = None
+        self._task_entry = None
+        self._result_label = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -103,7 +112,7 @@ class Overlay:
 
         # Position in the top-right corner of the primary screen
         screen_w = self._root.winfo_screenwidth()
-        self._root.geometry(f"340x220+{screen_w - 360}+10")
+        self._root.geometry(f"340x300+{screen_w - 360}+10")
 
         # Make the window click-through on supported platforms (Windows/X11)
         try:
@@ -214,6 +223,63 @@ class Overlay:
         self._minimap_label = tk.Label(mini_frame, bg=COLOUR_BG)
         self._minimap_label.pack()
 
+        # Task input section
+        sep2 = tk.Frame(root, bg="#444466", height=1)
+        sep2.pack(fill=tk.X, padx=6, pady=(4, 0))
+
+        task_frame = tk.Frame(root, bg=COLOUR_BG)
+        task_frame.pack(fill=tk.X, padx=6, pady=(4, 0))
+
+        task_hint = tk.Label(
+            task_frame,
+            text="Task:",
+            font=label_font,
+            fg=COLOUR_TEXT,
+            bg=COLOUR_BG,
+            anchor="w",
+        )
+        task_hint.pack(side=tk.LEFT)
+
+        self._task_var = tk.StringVar()
+        self._task_entry = tk.Entry(
+            task_frame,
+            textvariable=self._task_var,
+            bg="#252545",
+            fg=COLOUR_TEXT,
+            insertbackground=COLOUR_TEXT,
+            relief="flat",
+            font=label_font,
+        )
+        self._task_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 4))
+        self._task_entry.bind("<Return>", lambda _e: self._submit_task())
+
+        run_btn = tk.Button(
+            task_frame,
+            text="▶",
+            bg=COLOUR_ACTIVE,
+            fg="#000000",
+            activebackground="#00CC66",
+            relief="flat",
+            font=label_font,
+            command=self._submit_task,
+            cursor="hand2",
+        )
+        run_btn.pack(side=tk.RIGHT)
+
+        # Last result / status line
+        self._result_label = tk.Label(
+            root,
+            text="",
+            font=tkfont.Font(family="Helvetica", size=8),
+            fg="#888899",
+            bg=COLOUR_BG,
+            anchor="w",
+            padx=8,
+            wraplength=320,
+            justify="left",
+        )
+        self._result_label.pack(fill=tk.X)
+
         # Keyboard hint
         hint = tk.Label(
             root,
@@ -277,6 +343,22 @@ class Overlay:
         self._photo = ImageTk.PhotoImage(img)
         self._minimap_label.config(image=self._photo)
 
+    def _submit_task(self) -> None:
+        """Read the task entry, invoke the callback, and clear the field."""
+        if self._task_var is None:
+            return
+        text = self._task_var.get().strip()
+        if not text:
+            return
+        self._task_var.set("")
+        logger.info("Overlay task submitted: %s", text)
+        if self._task_submit_callback:
+            self._task_submit_callback(text)
+
+    def _refresh_result(self) -> None:
+        if self._result_label is not None:
+            self._result_label.config(text=self._last_result_text)
+
     # ------------------------------------------------------------------
     # External state update helpers
     # ------------------------------------------------------------------
@@ -298,6 +380,12 @@ class Overlay:
         self.minimap_image = img
         if self._root:
             self._root.after(0, self._refresh_minimap)
+
+    def set_last_result(self, text: str) -> None:
+        """Display the last task result snippet in the overlay."""
+        self._last_result_text = text
+        if self._root:
+            self._root.after(0, self._refresh_result)
 
     def __repr__(self) -> str:
         return f"Overlay(visible={self._visible}, input_active={self.input_active})"

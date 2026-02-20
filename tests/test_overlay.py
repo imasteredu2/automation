@@ -25,12 +25,17 @@ def _make_tk_stub():
         X = "x"
         BOTH = "both"
         BOTTOM = "bottom"
+        LEFT = "left"
+
         def __init__(self, *args, **kwargs):
             pass
+
         def pack(self, **kwargs):
             pass
+
         def config(self, **kwargs):
             pass
+
         configure = config
 
     class FakeTk(FakeWidget):
@@ -46,13 +51,33 @@ def _make_tk_stub():
         def deiconify(self): pass
         def withdraw(self): pass
 
+    class FakeEntry(FakeWidget):
+        def bind(self, *a, **kw): pass
+
+    class FakeButton(FakeWidget):
+        pass
+
+    class FakeStringVar:
+        def __init__(self, *a, **kw):
+            self._val = ""
+
+        def get(self):
+            return self._val
+
+        def set(self, v):
+            self._val = v
+
     tk_mod.Tk = FakeTk
     tk_mod.Label = FakeWidget
     tk_mod.Frame = FakeWidget
+    tk_mod.Entry = FakeEntry
+    tk_mod.Button = FakeButton
+    tk_mod.StringVar = FakeStringVar
     tk_mod.TclError = Exception
     tk_mod.X = "x"
     tk_mod.BOTH = "both"
     tk_mod.BOTTOM = "bottom"
+    tk_mod.LEFT = "left"
 
     tkfont_mod = types.ModuleType("tkinter.font")
 
@@ -197,6 +222,64 @@ class TestOverlaySetters(unittest.TestCase):
 
         mock_root.after.assert_called_once()
         self.assertTrue(overlay.bot_running)
+
+
+class TestOverlayTaskInput(unittest.TestCase):
+    """Task submit callback and last-result display."""
+
+    def setUp(self):
+        patcher = patch("src.overlay._get_tk", side_effect=_get_tk_stub)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_task_submit_callback_called(self):
+        from src.overlay import Overlay
+        submitted = []
+        overlay = Overlay(task_submit_callback=submitted.append)
+        # Manually set up the StringVar used by _submit_task
+        overlay._task_var = _TK_STUB.StringVar()
+        overlay._task_var.set("open notepad")
+        overlay._submit_task()
+        self.assertEqual(submitted, ["open notepad"])
+
+    def test_submit_clears_entry(self):
+        from src.overlay import Overlay
+        overlay = Overlay(task_submit_callback=lambda t: None)
+        overlay._task_var = _TK_STUB.StringVar()
+        overlay._task_var.set("some task")
+        overlay._submit_task()
+        self.assertEqual(overlay._task_var.get(), "")
+
+    def test_submit_empty_text_noop(self):
+        from src.overlay import Overlay
+        submitted = []
+        overlay = Overlay(task_submit_callback=submitted.append)
+        overlay._task_var = _TK_STUB.StringVar()
+        overlay._task_var.set("   ")
+        overlay._submit_task()
+        self.assertEqual(submitted, [])
+
+    def test_submit_without_callback_does_not_raise(self):
+        from src.overlay import Overlay
+        overlay = Overlay()  # no callback
+        overlay._task_var = _TK_STUB.StringVar()
+        overlay._task_var.set("hello")
+        overlay._submit_task()  # must not raise
+
+    def test_set_last_result_updates_state(self):
+        from src.overlay import Overlay
+        overlay = Overlay()
+        overlay._root = None
+        overlay.set_last_result("Task done!")
+        self.assertEqual(overlay._last_result_text, "Task done!")
+
+    def test_set_last_result_schedules_refresh_when_root_present(self):
+        from src.overlay import Overlay
+        overlay = Overlay()
+        mock_root = MagicMock()
+        overlay._root = mock_root
+        overlay.set_last_result("result text")
+        mock_root.after.assert_called_once()
 
 
 if __name__ == "__main__":

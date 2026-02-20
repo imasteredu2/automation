@@ -27,6 +27,7 @@ def _make_mock_ai_bot():
     bot = MagicMock()
     bot.is_loaded.return_value = True
     bot.plan_task.return_value = "Step 1: click button\nStep 2: done"
+    bot.generate_executable_steps.return_value = "CLICK 100 200\nPRESS enter"
     return bot
 
 
@@ -34,6 +35,13 @@ def _make_mock_input_ctrl():
     ctrl = MagicMock()
     ctrl.enabled = True
     return ctrl
+
+
+def _make_mock_action_executor():
+    from unittest.mock import MagicMock
+    ex = MagicMock()
+    ex.execute_plan.return_value = ["OK", "OK"]
+    return ex
 
 
 class TestTaskRunnerSubmit(unittest.TestCase):
@@ -143,6 +151,118 @@ class TestTaskRunnerWithOverlay(unittest.TestCase):
         calls = [c[0][0] for c in mock_overlay.set_bot_running.call_args_list]
         self.assertIn(True, calls)
         self.assertIn(False, calls)
+
+
+class TestTaskRunnerHistory(unittest.TestCase):
+
+    def setUp(self):
+        from src.task_runner import TaskRunner
+        self.vp = _make_mock_viewport()
+        self.bot = _make_mock_ai_bot()
+        self.ctrl = _make_mock_input_ctrl()
+        self.runner = TaskRunner(
+            viewport=self.vp,
+            ai_bot=self.bot,
+            input_controller=self.ctrl,
+            overlay=None,
+            minimap_interval=999,
+        )
+
+    def tearDown(self):
+        self.runner.stop()
+
+    def test_history_empty_initially(self):
+        self.assertEqual(self.runner.task_history, [])
+
+    def test_history_appended_after_task(self):
+        self.runner.start()
+        task = self.runner.submit("test history task")
+        task.done.wait(timeout=5)
+        history = self.runner.task_history
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["description"], "test history task")
+
+    def test_history_contains_plan(self):
+        self.runner.start()
+        task = self.runner.submit("history plan task")
+        task.done.wait(timeout=5)
+        history = self.runner.task_history
+        self.assertIn("plan", history[0])
+        self.assertIn("Step 1", history[0]["plan"])
+
+    def test_history_contains_timestamp(self):
+        self.runner.start()
+        task = self.runner.submit("timestamp task")
+        task.done.wait(timeout=5)
+        history = self.runner.task_history
+        self.assertIn("timestamp", history[0])
+        self.assertGreater(history[0]["timestamp"], 0)
+
+    def test_history_is_copy(self):
+        """task_history must return a copy, not the internal list."""
+        self.runner.start()
+        task = self.runner.submit("copy test")
+        task.done.wait(timeout=5)
+        h1 = self.runner.task_history
+        h1.clear()
+        h2 = self.runner.task_history
+        self.assertEqual(len(h2), 1)
+
+
+class TestTaskRunnerActionExecutor(unittest.TestCase):
+
+    def setUp(self):
+        from src.task_runner import TaskRunner
+        self.vp = _make_mock_viewport()
+        self.bot = _make_mock_ai_bot()
+        self.ctrl = _make_mock_input_ctrl()
+        self.executor = _make_mock_action_executor()
+        self.runner = TaskRunner(
+            viewport=self.vp,
+            ai_bot=self.bot,
+            input_controller=self.ctrl,
+            overlay=None,
+            action_executor=self.executor,
+            minimap_interval=999,
+        )
+
+    def tearDown(self):
+        self.runner.stop()
+
+    def test_execute_plan_called_when_executor_provided(self):
+        self.runner.start()
+        task = self.runner.submit("execute plan task")
+        task.done.wait(timeout=5)
+        self.executor.execute_plan.assert_called_once()
+
+    def test_step_results_stored_on_task(self):
+        self.runner.start()
+        task = self.runner.submit("step results task")
+        task.done.wait(timeout=5)
+        self.assertEqual(task.step_results, ["OK", "OK"])
+
+    def test_generate_executable_steps_called(self):
+        self.runner.start()
+        task = self.runner.submit("generate steps task")
+        task.done.wait(timeout=5)
+        self.bot.generate_executable_steps.assert_called_once()
+
+    def test_no_executor_no_step_results(self):
+        from src.task_runner import TaskRunner
+        runner = TaskRunner(
+            viewport=self.vp,
+            ai_bot=self.bot,
+            input_controller=self.ctrl,
+            overlay=None,
+            action_executor=None,
+            minimap_interval=999,
+        )
+        runner.start()
+        task = runner.submit("no executor")
+        task.done.wait(timeout=5)
+        runner.stop()
+        self.assertEqual(task.step_results, [])
+        self.bot.generate_executable_steps.assert_not_called()
 
 
 if __name__ == "__main__":

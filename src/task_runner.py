@@ -4,7 +4,7 @@ task_runner.py – Coordinates the Viewport, AIBot, and InputController.
 The TaskRunner ties all components together:
   1. Grabs a fresh screenshot from the Viewport.
   2. Passes it to the AIBot which analyses the screen and produces an action plan.
-  3. Executes mouse/keyboard actions via the InputController.
+  3. Optionally executes the plan via an ActionExecutor (structured steps).
   4. Pushes updated minimap frames to the Overlay.
 
 It runs the execution loop in a background thread so it never blocks the UI.
@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ class Task:
         self.description = description
         self.callback = callback
         self.result: Optional[str] = None
+        self.step_results: List[str] = []
         self.done = threading.Event()
 
     def __repr__(self) -> str:
@@ -59,6 +60,9 @@ class TaskRunner:
         :class:`~src.input_controller.InputController` instance.
     overlay:
         Optional :class:`~src.overlay.Overlay` instance for status updates.
+    action_executor:
+        Optional :class:`~src.action_executor.ActionExecutor` instance.
+        When provided, executable steps are generated and run after planning.
     monitor_index:
         Which physical monitor to capture for the primary viewport.
     minimap_interval:
@@ -71,6 +75,7 @@ class TaskRunner:
         ai_bot,
         input_controller,
         overlay=None,
+        action_executor=None,
         monitor_index: int = 1,
         minimap_interval: float = 3.0,
     ) -> None:
@@ -78,6 +83,7 @@ class TaskRunner:
         self.ai_bot = ai_bot
         self.input_controller = input_controller
         self.overlay = overlay
+        self.action_executor = action_executor
         self.monitor_index = monitor_index
         self.minimap_interval = minimap_interval
 
@@ -86,6 +92,8 @@ class TaskRunner:
         self._running = False
         self._worker_thread: Optional[threading.Thread] = None
         self._minimap_thread: Optional[threading.Thread] = None
+        self._history: List[Dict[str, Any]] = []
+        self._history_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Task submission
@@ -147,8 +155,45 @@ class TaskRunner:
             plan = self.ai_bot.plan_task(frame, task.description)
             task.result = plan
             logger.info("Task plan:\n%s", plan)
+
+            # Attempt structured execution if an ActionExecutor is wired in
+            if self.action_executor is not None:
+                try:
+                    steps_text = self.ai_bot.generate_executable_steps(
+                        frame,
+                        task.description,
+                    )
+                    task.step_results = self.action_executor.execute_plan(steps_text)
+                    logger.info(
+                        "Executed %d step(s): %s",
+                        len(task.step_results),
+                        task.step_results,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Step execution failed for task: %s", task.description
+                    )
+
             if task.callback:
                 task.callback(plan)
+
+            # Update last-result on the overlay (trimmed for display)
+            if self.overlay and hasattr(self.overlay, "set_last_result"):
+                snippet = plan[:120] + "…" if len(plan) > 120 else plan
+                self.overlay.set_last_result(snippet)
+
+            # Append to history (capped at 50 entries)
+            with self._history_lock:
+                self._history.append(
+                    {
+                        "description": task.description,
+                        "plan": plan,
+                        "timestamp": time.time(),
+                    }
+                )
+                if len(self._history) > 50:
+                    self._history = self._history[-50:]
+
         except Exception:
             logger.exception("Error executing task: %s", task.description)
             task.result = "ERROR: see logs for details"
@@ -205,11 +250,21 @@ class TaskRunner:
             self._minimap_thread.join(timeout=5)
         logger.info("TaskRunner stopped")
 
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
     @property
     def queue_length(self) -> int:
         """Number of tasks currently waiting in the queue."""
         with self._queue_lock:
             return len(self._queue)
+
+    @property
+    def task_history(self) -> List[Dict[str, Any]]:
+        """List of completed task records (newest last, max 50 entries)."""
+        with self._history_lock:
+            return list(self._history)
 
     def __repr__(self) -> str:
         return (
