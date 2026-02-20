@@ -37,6 +37,12 @@ DEFAULTS: Dict[str, Any] = {
     "viewport_refresh_ms": 1000,
     "input_enabled_on_start": True,
     "log_level": "INFO",
+    # Screenshot manager
+    "screenshot_dir": str(Path.home() / ".automation" / "screenshots"),
+    "screenshot_max_count": 200,
+    # Autonomous loop
+    "autonomous_max_iterations": 20,
+    "autonomous_step_delay": 1.0,
 }
 
 
@@ -139,6 +145,32 @@ class Config:
     @property
     def log_level(self) -> str:
         return str(self._data.get("log_level", DEFAULTS["log_level"]))
+
+    @property
+    def screenshot_dir(self) -> Path:
+        return Path(
+            self._data.get("screenshot_dir", DEFAULTS["screenshot_dir"])
+        )
+
+    @property
+    def screenshot_max_count(self) -> int:
+        return int(
+            self._data.get("screenshot_max_count", DEFAULTS["screenshot_max_count"])
+        )
+
+    @property
+    def autonomous_max_iterations(self) -> int:
+        return int(
+            self._data.get(
+                "autonomous_max_iterations", DEFAULTS["autonomous_max_iterations"]
+            )
+        )
+
+    @property
+    def autonomous_step_delay(self) -> float:
+        return float(
+            self._data.get("autonomous_step_delay", DEFAULTS["autonomous_step_delay"])
+        )
 
     def __repr__(self) -> str:
         return f"Config(path={self._path}, keys={list(self._data)})"
