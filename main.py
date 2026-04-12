@@ -214,7 +214,7 @@ def main() -> None:
     def _on_start() -> None:
         input_ctrl.activate()
         overlay.set_input_active(True)
-        if not runner._running:
+        if not runner.running:
             runner.start()
         else:
             runner.resume()
@@ -246,8 +246,7 @@ def main() -> None:
     def _on_close() -> None:
         logger.info("Close button pressed – shutting down.")
         _shutdown_requested.set()
-        if overlay._root:
-            overlay._root.after(0, overlay._root.quit)
+        overlay.quit_mainloop()
 
     overlay._task_submit_callback = _on_task_submit
     overlay._start_callback  = _on_start

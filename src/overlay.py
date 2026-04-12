@@ -515,7 +515,7 @@ class Overlay:
         self._paused_state = paused
         if self._pause_btn and self._root:
             label = "▶ Resume" if paused else "⏸ Pause"
-            self._root.after(0, lambda: self._pause_btn.config(text=label))  # type: ignore[union-attr]
+            self._root.after(0, lambda lbl=label: self._pause_btn.config(text=lbl))  # type: ignore[union-attr]
 
     def set_input_active(self, active: bool) -> None:
         """Update the input control status indicator."""
@@ -540,6 +540,11 @@ class Overlay:
         self._last_result_text = text
         if self._root:
             self._root.after(0, self._refresh_result)
+
+    def quit_mainloop(self) -> None:
+        """Ask the Tk event loop to exit (safe to call from any thread)."""
+        if self._root:
+            self._root.after(0, self._root.quit)
 
     def __repr__(self) -> str:
         return f"Overlay(visible={self._visible}, input_active={self.input_active})"

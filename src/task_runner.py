@@ -309,6 +309,11 @@ class TaskRunner:
             return len(self._queue)
 
     @property
+    def running(self) -> bool:
+        """Whether the worker thread is currently active."""
+        return self._running
+
+    @property
     def paused(self) -> bool:
         """Whether task execution is currently paused."""
         return self._paused
