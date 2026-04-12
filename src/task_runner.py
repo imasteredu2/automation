@@ -97,6 +97,9 @@ class TaskRunner:
         self._queue: List[Task] = []
         self._queue_lock = threading.Lock()
         self._running = False
+        self._paused = False
+        self._pause_event = threading.Event()
+        self._pause_event.set()  # not paused initially
         self._worker_thread: Optional[threading.Thread] = None
         self._minimap_thread: Optional[threading.Thread] = None
         self._history: List[Dict[str, Any]] = []
@@ -137,6 +140,10 @@ class TaskRunner:
     def _worker(self) -> None:
         logger.info("TaskRunner worker started")
         while self._running:
+            # Block here while paused
+            self._pause_event.wait()
+            if not self._running:
+                break
             task = self._next_task()
             if task is None:
                 time.sleep(0.1)
@@ -272,11 +279,24 @@ class TaskRunner:
     def stop(self) -> None:
         """Signal all background threads to stop and wait for them."""
         self._running = False
+        self._pause_event.set()  # unblock if paused so the thread can exit
         if self._worker_thread:
             self._worker_thread.join(timeout=5)
         if self._minimap_thread:
             self._minimap_thread.join(timeout=5)
         logger.info("TaskRunner stopped")
+
+    def pause(self) -> None:
+        """Pause task execution (current task finishes; next is held)."""
+        self._paused = True
+        self._pause_event.clear()
+        logger.info("TaskRunner paused")
+
+    def resume(self) -> None:
+        """Resume task execution after a :meth:`pause`."""
+        self._paused = False
+        self._pause_event.set()
+        logger.info("TaskRunner resumed")
 
     # ------------------------------------------------------------------
     # Properties
@@ -287,6 +307,11 @@ class TaskRunner:
         """Number of tasks currently waiting in the queue."""
         with self._queue_lock:
             return len(self._queue)
+
+    @property
+    def paused(self) -> bool:
+        """Whether task execution is currently paused."""
+        return self._paused
 
     @property
     def task_history(self) -> List[Dict[str, Any]]:

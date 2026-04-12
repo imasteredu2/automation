@@ -5,17 +5,25 @@ Displays a small always-on-top, click-through HUD that shows:
   • Whether the InputController is ACTIVE or INACTIVE
   • Whether the AI bot is RUNNING or IDLE
   • A live thumbnail composite of all monitors (mini-map)
+  • Control buttons: Start ▶  Pause ⏸  Stop ⏹  Close ✕
 
 Key bindings (handled in hotkey_manager.py, but documented here):
   • Ctrl+L         – toggle overlay visibility
   • Ctrl+Alt+Home  – activate input control
   • Ctrl+Alt+End   – deactivate input control
+
+Windows 11 notes
+----------------
+The overlay uses ``wm_attributes('-alpha', ...)`` for semi-transparency.
+``overrideredirect(True)`` removes the title bar; the window can be dragged
+by clicking and dragging anywhere on the header/control row.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Optional, TYPE_CHECKING
+import sys
+from typing import Optional, Callable, TYPE_CHECKING
 
 from PIL import Image
 
@@ -37,17 +45,22 @@ def _get_tk():
     except ImportError as exc:
         raise ImportError(
             "tkinter is required for the overlay. "
-            "Install python3-tk (e.g. 'apt install python3-tk')."
+            "Install python3-tk (e.g. 'apt install python3-tk' on Linux, "
+            "or use the official Python installer on Windows which bundles it)."
         ) from exc
 
 
 # Colour constants
-COLOUR_ACTIVE = "#00FF88"
+COLOUR_ACTIVE   = "#00FF88"
 COLOUR_INACTIVE = "#FF4444"
-COLOUR_IDLE = "#AAAAAA"
-COLOUR_BG = "#1A1A2E"
-COLOUR_TEXT = "#E0E0E0"
-OVERLAY_ALPHA = 0.82  # Window-level opacity (0.0–1.0)
+COLOUR_PAUSE    = "#FFD700"
+COLOUR_IDLE     = "#AAAAAA"
+COLOUR_BG       = "#1A1A2E"
+COLOUR_TEXT     = "#E0E0E0"
+COLOUR_CLOSE    = "#FF6060"
+OVERLAY_ALPHA   = 0.88  # Window-level opacity (0.0–1.0)
+
+_IS_WINDOWS = sys.platform == "win32"
 
 
 class Overlay:
@@ -66,17 +79,34 @@ class Overlay:
     task_submit_callback:
         Optional callable invoked when the user submits a task via the
         overlay's text entry.  Signature: ``callback(task_text: str)``.
+    start_callback:
+        Called when the user clicks the **Start** button.
+    pause_callback:
+        Called when the user clicks the **Pause** button.
+    stop_callback:
+        Called when the user clicks the **Stop** button.
+    close_callback:
+        Called when the user clicks the **Close (✕)** button.  If not
+        provided, the overlay window is simply destroyed.
     """
 
     def __init__(
         self,
         update_interval_ms: int = 500,
         minimap_interval_ms: int = 2000,
-        task_submit_callback=None,
+        task_submit_callback: Optional[Callable[[str], None]] = None,
+        start_callback: Optional[Callable[[], None]] = None,
+        pause_callback: Optional[Callable[[], None]] = None,
+        stop_callback: Optional[Callable[[], None]] = None,
+        close_callback: Optional[Callable[[], None]] = None,
     ) -> None:
         self.update_interval_ms = update_interval_ms
         self.minimap_interval_ms = minimap_interval_ms
         self._task_submit_callback = task_submit_callback
+        self._start_callback  = start_callback
+        self._pause_callback  = pause_callback
+        self._stop_callback   = stop_callback
+        self._close_callback  = close_callback
 
         self._root = None
         self._visible: bool = True
@@ -89,12 +119,18 @@ class Overlay:
 
         # Tkinter widget references
         self._status_label = None
-        self._bot_label = None
+        self._bot_label    = None
         self._minimap_label = None
         self._photo = None
-        self._task_var = None
+        self._task_var   = None
         self._task_entry = None
         self._result_label = None
+        self._pause_btn  = None
+        self._paused_state: bool = False
+
+        # Drag-support state (for borderless window)
+        self._drag_x: int = 0
+        self._drag_y: int = 0
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -112,13 +148,18 @@ class Overlay:
 
         # Position in the top-right corner of the primary screen
         screen_w = self._root.winfo_screenwidth()
-        self._root.geometry(f"340x300+{screen_w - 360}+10")
+        self._root.geometry(f"360x380+{screen_w - 380}+10")
 
-        # Make the window click-through on supported platforms (Windows/X11)
-        try:
-            self._root.attributes("-transparentcolor", "")
-        except tk.TclError:
-            pass
+        # Windows 11: make the non-interactive background transparent so the
+        # coloured widgets "float" while the dark bg lets click-events through.
+        if _IS_WINDOWS:
+            try:
+                # -transparentcolor makes that exact colour fully transparent
+                # on Windows; we leave bg as COLOUR_BG so only that colour
+                # is click-through – the widgets remain interactive.
+                self._root.attributes("-transparentcolor", COLOUR_BG)
+            except tk.TclError:
+                pass  # older Tk on Windows may not support this
 
         self._build_widgets()
         self._schedule_updates()
@@ -164,23 +205,86 @@ class Overlay:
         root = self._root
         assert root is not None
 
-        title_font = tkfont.Font(family="Helvetica", size=10, weight="bold")
-        label_font = tkfont.Font(family="Helvetica", size=9)
+        title_font  = tkfont.Font(family="Helvetica", size=10, weight="bold")
+        label_font  = tkfont.Font(family="Helvetica", size=9)
+        button_font = tkfont.Font(family="Helvetica", size=9, weight="bold")
 
-        # Title bar
+        # ------------------------------------------------------------------
+        # Title bar (also drag handle)
+        # ------------------------------------------------------------------
+        title_bar = tk.Frame(root, bg=COLOUR_BG, cursor="fleur")
+        title_bar.pack(fill=tk.X)
+
         title = tk.Label(
-            root,
+            title_bar,
             text="🤖  Automation HUD",
             font=title_font,
             fg=COLOUR_TEXT,
             bg=COLOUR_BG,
             pady=4,
         )
-        title.pack(fill=tk.X)
+        title.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Bind drag on both the frame and the label
+        for widget in (title_bar, title):
+            widget.bind("<Button-1>",   self._drag_start)
+            widget.bind("<B1-Motion>",  self._drag_motion)
+
+        # ------------------------------------------------------------------
+        # Control buttons: Start | Pause | Stop | Close
+        # ------------------------------------------------------------------
+        ctrl_frame = tk.Frame(root, bg=COLOUR_BG, pady=2)
+        ctrl_frame.pack(fill=tk.X, padx=6)
+
+        btn_cfg = dict(relief="flat", font=button_font, padx=6, pady=2, cursor="hand2")
+
+        start_btn = tk.Button(
+            ctrl_frame,
+            text="▶ Start",
+            bg=COLOUR_ACTIVE,
+            fg="#000000",
+            activebackground="#00CC66",
+            command=self._on_start,
+            **btn_cfg,
+        )
+        start_btn.pack(side=tk.LEFT, padx=(0, 4))
+
+        self._pause_btn = tk.Button(
+            ctrl_frame,
+            text="⏸ Pause",
+            bg=COLOUR_PAUSE,
+            fg="#000000",
+            activebackground="#CCB000",
+            command=self._on_pause,
+            **btn_cfg,
+        )
+        self._pause_btn.pack(side=tk.LEFT, padx=(0, 4))
+
+        stop_btn = tk.Button(
+            ctrl_frame,
+            text="⏹ Stop",
+            bg=COLOUR_INACTIVE,
+            fg="#FFFFFF",
+            activebackground="#CC2222",
+            command=self._on_stop,
+            **btn_cfg,
+        )
+        stop_btn.pack(side=tk.LEFT, padx=(0, 4))
+
+        close_btn = tk.Button(
+            ctrl_frame,
+            text="✕",
+            bg=COLOUR_CLOSE,
+            fg="#FFFFFF",
+            activebackground="#CC3030",
+            command=self._on_close,
+            **btn_cfg,
+        )
+        close_btn.pack(side=tk.RIGHT)
 
         # Separator line
         sep = tk.Frame(root, bg="#444466", height=1)
-        sep.pack(fill=tk.X, padx=6)
+        sep.pack(fill=tk.X, padx=6, pady=(2, 0))
 
         # Input controller status
         self._status_label = tk.Label(
@@ -275,7 +379,7 @@ class Overlay:
             bg=COLOUR_BG,
             anchor="w",
             padx=8,
-            wraplength=320,
+            wraplength=340,
             justify="left",
         )
         self._result_label.pack(fill=tk.X)
@@ -292,6 +396,49 @@ class Overlay:
 
         # Initial render
         self._refresh_status()
+
+    # ------------------------------------------------------------------
+    # Drag support (borderless window)
+    # ------------------------------------------------------------------
+
+    def _drag_start(self, event) -> None:
+        self._drag_x = event.x
+        self._drag_y = event.y
+
+    def _drag_motion(self, event) -> None:
+        if self._root is None:
+            return
+        dx = event.x - self._drag_x
+        dy = event.y - self._drag_y
+        x = self._root.winfo_x() + dx
+        y = self._root.winfo_y() + dy
+        self._root.geometry(f"+{x}+{y}")
+
+    # ------------------------------------------------------------------
+    # Control button handlers
+    # ------------------------------------------------------------------
+
+    def _on_start(self) -> None:
+        logger.info("Overlay: Start button clicked")
+        if self._start_callback:
+            self._start_callback()
+
+    def _on_pause(self) -> None:
+        logger.info("Overlay: Pause/Resume button clicked")
+        if self._pause_callback:
+            self._pause_callback()
+
+    def _on_stop(self) -> None:
+        logger.info("Overlay: Stop button clicked")
+        if self._stop_callback:
+            self._stop_callback()
+
+    def _on_close(self) -> None:
+        logger.info("Overlay: Close button clicked")
+        if self._close_callback:
+            self._close_callback()
+        else:
+            self.destroy()
 
     # ------------------------------------------------------------------
     # Periodic updates
@@ -362,6 +509,13 @@ class Overlay:
     # ------------------------------------------------------------------
     # External state update helpers
     # ------------------------------------------------------------------
+
+    def set_paused(self, paused: bool) -> None:
+        """Update the Pause button label to reflect current state."""
+        self._paused_state = paused
+        if self._pause_btn and self._root:
+            label = "▶ Resume" if paused else "⏸ Pause"
+            self._root.after(0, lambda: self._pause_btn.config(text=label))  # type: ignore[union-attr]
 
     def set_input_active(self, active: bool) -> None:
         """Update the input control status indicator."""

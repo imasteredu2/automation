@@ -178,7 +178,6 @@ def main() -> None:
         update_interval_ms=500,
         minimap_interval_ms=cfg.minimap_interval_ms,
     )
-    chat_win = ChatWindow()
 
     ai_bot = AIBot(model_id=model_id)
     if not args.no_ai:
@@ -200,6 +199,8 @@ def main() -> None:
         minimap_interval=cfg.minimap_interval_ms / 1000.0,
     )
 
+    chat_win = ChatWindow()
+
     # Wire overlay task-submit callback
     def _on_task_submit(text: str) -> None:
         chat_win.add_message("user", text)
@@ -207,7 +208,52 @@ def main() -> None:
             chat_win.add_message("bot", plan[:500] + ("…" if len(plan) > 500 else ""))
         runner.submit(text, callback=_cb)
 
+    # ------------------------------------------------------------------
+    # Overlay control button callbacks
+    # ------------------------------------------------------------------
+    def _on_start() -> None:
+        input_ctrl.activate()
+        overlay.set_input_active(True)
+        if not runner._running:
+            runner.start()
+        else:
+            runner.resume()
+        overlay.set_paused(False)
+        chat_win.add_message("system", "Bot STARTED / resumed.")
+        logger.info("Bot started via overlay button.")
+
+    def _on_pause() -> None:
+        if runner.paused:
+            runner.resume()
+            overlay.set_paused(False)
+            chat_win.add_message("system", "Bot RESUMED.")
+            logger.info("Bot resumed via overlay button.")
+        else:
+            runner.pause()
+            overlay.set_paused(True)
+            chat_win.add_message("system", "Bot PAUSED.")
+            logger.info("Bot paused via overlay button.")
+
+    def _on_stop() -> None:
+        runner.stop()
+        overlay.set_bot_running(False)
+        overlay.set_paused(False)
+        chat_win.add_message("system", "Bot STOPPED.")
+        logger.info("Bot stopped via overlay button.")
+
+    _shutdown_requested = threading.Event()
+
+    def _on_close() -> None:
+        logger.info("Close button pressed – shutting down.")
+        _shutdown_requested.set()
+        if overlay._root:
+            overlay._root.after(0, overlay._root.quit)
+
     overlay._task_submit_callback = _on_task_submit
+    overlay._start_callback  = _on_start
+    overlay._pause_callback  = _on_pause
+    overlay._stop_callback   = _on_stop
+    overlay._close_callback  = _on_close
     chat_win._task_submit_callback = _on_task_submit
 
     scheduler = Scheduler(task_runner=runner)
